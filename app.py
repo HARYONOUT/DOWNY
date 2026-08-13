@@ -142,7 +142,7 @@ def download_video(url, platform, format_choice, progress_placeholder, text_plac
 # ------------------------------------------------------------
 def main():
     st.set_page_config(page_title="Multi Downloader", page_icon="📥")
-    st.title("📥 Multi Platform Downloader")
+    st.title("📥 Dwonload YT dan IG Ora Ono Iklan")
     st.markdown("Unduh video/audio dari **YouTube** atau **Instagram** dengan mudah.")
 
     # Cek ffmpeg
