@@ -7,7 +7,7 @@ import shutil
 import shutil as shutil_lib
 
 # ------------------------------------------------------------
-# 1. Fungsi mencari ffmpeg (dengan fallback manual)
+# 1. Fungsi mencari ffmpeg
 # ------------------------------------------------------------
 def find_ffmpeg():
     ffmpeg_path = shutil_lib.which('ffmpeg')
@@ -18,20 +18,18 @@ def find_ffmpeg():
         r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
         r'D:\ffmpeg\bin\ffmpeg.exe',
         os.path.expanduser('~/ffmpeg/bin/ffmpeg.exe'),
+        '/usr/bin/ffmpeg',      # untuk cloud Linux
+        '/usr/local/bin/ffmpeg',
     ]
     for path in custom_paths:
-        if os.path.exists(path):
-            return path
-    common_paths = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']
-    for path in common_paths:
         if os.path.exists(path):
             return path
     return None
 
 # ------------------------------------------------------------
-# 2. Fungsi unduh (dengan perbaikan untuk MP4)
+# 2. Fungsi unduh dengan opsi anti-403
 # ------------------------------------------------------------
-def download_video(url, platform, format_choice, progress_placeholder, text_placeholder):
+def download_video(url, platform, format_choice, progress_placeholder, text_placeholder, cookies_path=None):
     temp_dir = tempfile.mkdtemp()
     ffmpeg_loc = find_ffmpeg()
     if not ffmpeg_loc:
@@ -58,20 +56,32 @@ def download_video(url, platform, format_choice, progress_placeholder, text_plac
     # Opsi dasar
     ydl_opts = {
         'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-        'quiet': False,               # biar dapat log error
+        'quiet': False,
         'no_warnings': False,
         'ignoreerrors': False,
         'progress_hooks': [progress_hook],
         'ffmpeg_location': ffmpeg_loc,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'nocheckcertificate': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
     }
+
+    # Jika ada cookies, tambahkan
+    if cookies_path and os.path.exists(cookies_path):
+        ydl_opts['cookiefile'] = cookies_path
 
     # --------------------------------------------------------
     # Atur opsi berdasarkan platform dan format
     # --------------------------------------------------------
     if platform == "YouTube":
+        # Tambahkan extractor args khusus YouTube untuk hindari 403
+        ydl_opts['extractor_args'] = {
+            'youtube': {
+                'player_client': ['android', 'web'],
+                'skip': ['hls', 'dash'],
+            }
+        }
         if format_choice == 'mp3':
             ydl_opts.update({
                 'format': 'bestaudio/best',
@@ -84,7 +94,6 @@ def download_video(url, platform, format_choice, progress_placeholder, text_plac
                 'audioformat': 'mp3',
             })
         else:  # mp4
-            # Gunakan merge untuk memastikan output MP4
             ydl_opts.update({
                 'format': 'bestvideo+bestaudio/best',
                 'merge_output_format': 'mp4',
@@ -117,7 +126,6 @@ def download_video(url, platform, format_choice, progress_placeholder, text_plac
             ext = '.mp3' if format_choice == 'mp3' else '.mp4'
             files = glob.glob(os.path.join(temp_dir, f'*{ext}'))
             if not files:
-                # Jika tidak ada, ambil file terbaru (fallback)
                 all_files = glob.glob(os.path.join(temp_dir, '*'))
                 if all_files:
                     files = [max(all_files, key=os.path.getmtime)]
@@ -126,7 +134,6 @@ def download_video(url, platform, format_choice, progress_placeholder, text_plac
             return files[0], temp_dir
     except Exception as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
-        # Lempar ulang exception agar ditangkap di UI
         raise e
 
 # ------------------------------------------------------------
@@ -135,7 +142,7 @@ def download_video(url, platform, format_choice, progress_placeholder, text_plac
 def main():
     st.set_page_config(page_title="Multi Downloader", page_icon="📥")
     
-    # CSS untuk memperbesar font
+    # CSS perbesar font
     st.markdown("""
     <style>
         .stApp { font-size: 20px; }
@@ -152,26 +159,29 @@ def main():
     st.title("📥 Download YT dan IG Ora Ono Iklan")
     st.markdown("Unduh video/audio dari **YouTube** atau **Instagram** dengan mudah.")
 
-    # Cek ffmpeg
     ffmpeg_path = find_ffmpeg()
     if ffmpeg_path:
         st.success(f"✅ ffmpeg terdeteksi di: `{ffmpeg_path}`")
     else:
         st.warning("⚠️ ffmpeg tidak ditemukan! Pastikan ffmpeg terinstal dan tersedia di PATH.")
 
-    platform_choice = st.radio(
-        "🌐 Pilih platform:",
-        options=["YouTube", "Instagram"],
-        index=0
-    )
-
+    platform_choice = st.radio("🌐 Pilih platform:", ["YouTube", "Instagram"], index=0)
     url = st.text_input("🔗 Masukkan URL:", placeholder="https://www.youtube.com/watch?v=...  atau  https://www.instagram.com/...")
 
-    format_choice = st.radio(
-        "📁 Pilih format:",
-        options=["MP3 (Audio)", "MP4 (Video)"],
-        index=0
-    )
+    # Fitur unggah cookies (opsional)
+    st.markdown("---")
+    st.subheader("🍪 Opsi Tambahan (jika mengalami error 403)")
+    cookies_file = st.file_uploader("Unggah file cookies.txt (opsional)", type=['txt'])
+    cookies_path = None
+    if cookies_file:
+        # Simpan ke file sementara
+        temp_cookies = tempfile.NamedTemporaryFile(delete=False, suffix='.txt')
+        temp_cookies.write(cookies_file.getvalue())
+        temp_cookies.close()
+        cookies_path = temp_cookies.name
+        st.success("✅ cookies.txt berhasil diunggah!")
+
+    format_choice = st.radio("📁 Pilih format:", ["MP3 (Audio)", "MP4 (Video)"], index=0)
 
     if 'download_ready' not in st.session_state:
         st.session_state.download_ready = False
@@ -196,7 +206,7 @@ def main():
         text_placeholder.text("⏳ Memulai unduhan...")
 
         try:
-            file_path, temp_dir = download_video(url, platform_choice, fmt, progress_placeholder, text_placeholder)
+            file_path, temp_dir = download_video(url, platform_choice, fmt, progress_placeholder, text_placeholder, cookies_path)
             text_placeholder.text("✅ Unduhan selesai! File siap diunduh.")
 
             st.session_state.download_ready = True
@@ -207,8 +217,12 @@ def main():
         except Exception as e:
             text_placeholder.text("❌ Gagal mengunduh")
             st.error(f"Terjadi kesalahan:\n\n{e}")
-            st.info("Pastikan URL valid. Untuk Instagram, konten privat memerlukan cookies (fitur belum ditambahkan).")
+            st.info("Pastikan URL valid. Jika muncul error 403, coba unggah cookies.txt dari browser yang sudah login ke YouTube.")
             st.session_state.download_ready = False
+
+        # Hapus file cookies sementara jika ada
+        if cookies_path and os.path.exists(cookies_path):
+            os.unlink(cookies_path)
 
     if st.session_state.download_ready:
         file_path = st.session_state.file_path
